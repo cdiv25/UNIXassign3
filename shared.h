@@ -14,6 +14,8 @@
 
 #define READ_FAILED -1 /* readUntilDelim failure value */
 #define NUMQUESTIONS 5 /* Number of questions to ask */
+#define SUCCESS 0      /* Function return value on success */
+#define FAILURE -1     /* Function return value on failure*/
 
 /* The function safeRead() is a wrapper for the read() systemcall. The function ensures that the
  * program will read the requested number of characters even if an interrupt occurs.

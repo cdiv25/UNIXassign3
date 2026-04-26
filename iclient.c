@@ -5,7 +5,9 @@
  * Email: cian.divilly@ucdconnect.ie
  *
  * This program facilitates the user taking part in a 5-question quiz which is hosted by an external
- * server. Communication between cleint and server happens over sockets. */
+ * server. Communication between cleint and server happens over sockets.
+ * Note: The logic for creating, connecting and closing sockets was based on the TCP socket sources
+ * on moodle. We were told that we should use these as a template for programmes which we write */
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -26,6 +28,8 @@
 
 /******** Function Declarations **********/
 void playRound(int cfd);
+char welcomeUser(int cfd);
+int doQuestions(int cfd);
 
 int main(int argc, char *argv[])
 {
@@ -79,6 +83,44 @@ int main(int argc, char *argv[])
  * Arguments:   cfd:    File descriptor describing socket used for communication with server */
 void playRound(int cfd)
 {
+    char buffer[BUFLEN];   /* Buffer for reading/writing to socket */
+    int numReceived = 0;   /* Number of bytes received */
+    char shouldQuit = 'Q'; /* Indicates whether user decided to quit quiz*/
+
+    /* Receive welcome message and decide whether to continue */
+    shouldQuit = welcomeUser(cfd);
+    if (shouldQuit == 'q' || shouldQuit == 'Q')
+        return; /* Quit quiz */
+
+    /* Receive questions, get answers, send answers*/
+    if (doQuestions(cfd) == FAILURE)
+        return; /* Error communicating over socket. Quit quiz*/
+
+    /* Quiz over. Get score from teh server */
+    numReceived = readUntilDelim(cfd, buffer, sizeof(buffer), '\0');
+    if (numReceived < 0)
+    {
+        fprintf(stderr, "Error: Failed to receive score\n");
+        return;
+    }
+    else if (numReceived == 0)
+    {
+        fprintf(stderr, "Error: Socket closed before score received\n");
+        return;
+    }
+    printf("%s", buffer); /* Print score message */
+}
+
+/* The function welcomeUser() receives the welcome message from the server, displays this message,
+ * gets the user's reponse for whether to quit and sends this response to the server.
+ *
+ * Arguments:   cfd:    file descriptor for communication with server over socket.
+ *
+ * Return value:        Returns 'q' or 'Q' if the user chooses to quit the quiz. Returns 'Q' if an
+ *                      error occurs sending or receiving data over the socket. Returns 'y' or 'Y'
+ * if the user decides to continue with the quiz and no error occurs */
+char welcomeUser(int cfd)
+{
     char buffer[BUFLEN]; /* Buffer for reading/writing to socket */
     int numReceived = 0; /* Number of bytes received */
 
@@ -87,12 +129,12 @@ void playRound(int cfd)
     if (numReceived < 0)
     {
         fprintf(stderr, "Error: Failed to receive welcome message\n");
-        return;
+        return 'Q';
     }
     else if (numReceived == 0)
     {
         fprintf(stderr, "Error: Socket closed on other end before welcome received\n");
-        return;
+        return 'Q';
     }
     printf("%s", buffer); /* Print welcome message */
 
@@ -115,16 +157,29 @@ void playRound(int cfd)
     if (numSent < 0)
     {
         fprintf(stderr, "Error: Could not send continue/quit response\n");
-        return;
+        return 'Q';
     }
     else if (numSent == 0)
     {
         fprintf(stderr, "Error: Socket closed. Could not send continue/quit response\n");
-        return;
+        return 'Q';
     }
 
-    if (buffer[0] == 'q' || buffer[0] == 'Q')
-        return; /* Quit quiz */
+    return buffer[0];
+}
+
+/* The function doQuestions() receives questions from the server, one-by-one.
+ * For each question, the function reads in the user's answer via stdin, sends the answer to the
+ * server and receives a message from the server, indicating wthether the answer was correct.
+ *
+ * Arguments:   cfd:    file descriptor for communication with server over socket
+ *
+ * Return value:    Returns FAILURE if there is an issue communicatiing over the socket. Returns
+ *                  SUCCESS otherwise */
+int doQuestions(int cfd)
+{
+    char buffer[BUFLEN]; /* Buffer for reading/writing to socket */
+    int numReceived = 0; /* Number of bytes received */
 
     /* Handle each question */
     for (int questionNum = 0; questionNum < NUMQUESTIONS; questionNum++)
@@ -134,12 +189,12 @@ void playRound(int cfd)
         if (numReceived < 0)
         {
             fprintf(stderr, "Error: Failed to receive question\n");
-            return;
+            return FAILURE;
         }
         else if (numReceived == 0)
         {
             fprintf(stderr, "Error: Socket closed before question received\n");
-            return;
+            return FAILURE;
         }
         printf("%s\n", buffer); /* Print question */
 
@@ -151,16 +206,16 @@ void playRound(int cfd)
             buffer[strlen(buffer) - 1] = '\0'; /* Remove newline (for strcmp with correct answer)*/
 
         /* Send Answer (including terminating '\0')*/
-        numSent = safeWrite(cfd, buffer, strlen(buffer) + 1);
+        int numSent = safeWrite(cfd, buffer, strlen(buffer) + 1);
         if (numSent < 0)
         {
             fprintf(stderr, "Error: Could not send answer\n");
-            return;
+            return FAILURE;
         }
         else if (numSent == 0)
         {
             fprintf(stderr, "Error: Socket closed before answer could be sent\n");
-            return;
+            return FAILURE;
         }
 
         /* Get Right/Wrong answer message from server */
@@ -168,27 +223,15 @@ void playRound(int cfd)
         if (numReceived < 0)
         {
             fprintf(stderr, "Error: Failed to receive right/wrong answer message\n");
-            return;
+            return FAILURE;
         }
         else if (numReceived == 0)
         {
             fprintf(stderr, "Error: Failed to receive right/wrong answer message\n");
-            return;
+            return FAILURE;
         }
         printf("%s", buffer); /* Display the right/wrong answer message */
     }
 
-    /* Quiz over. Get score form server */
-    numReceived = readUntilDelim(cfd, buffer, sizeof(buffer), '\0');
-    if (numReceived < 0)
-    {
-        fprintf(stderr, "Error: Failed to receive score\n");
-        return;
-    }
-    else if (numReceived == 0)
-    {
-        fprintf(stderr, "Error: Socket closed before score received\n");
-        return;
-    }
-    printf("%s", buffer); /* Print score message */
+    return SUCCESS;
 }

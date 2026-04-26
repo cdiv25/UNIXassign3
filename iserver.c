@@ -5,7 +5,10 @@
  * Email: cian.divilly@ucdconnect.ie
  *
  * This program facilitates the user taking part in a 5-question quiz which is hosted by an external
- * server. Communication between cleint and server happens over sockets. */
+ * server. Communication between client and server happens over sockets.
+ *
+ * Note: The logic for creating, connecting and closing sockets was based on the TCP socket sources
+ * on moodle. We were told that we should use these as a template for programmes which we write */
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -28,6 +31,7 @@
 
 /******************* Function Declarations *******************/
 void hostQuiz(int cfd);
+int sendQuestions(int cfd);
 
 int main(int argc, char *argv[])
 {
@@ -164,9 +168,40 @@ void hostQuiz(int cfd)
     if (buffer[0] == 'q' || buffer[0] == 'Q')
         return; /* Client wants to quit round */
 
-    /* Send questions */
+    /* Send questions to client, receive answers and send "right/wrong answer" message */
+    int score = sendQuestions(cfd);
+
+    /* Send score, including '\0' */
+    snprintf(buffer, sizeof(buffer), "Your quiz score is %d/%d. Goodbye.\n", score, NUMQUESTIONS);
+    retVal = safeWrite(cfd, buffer, strlen(buffer) + 1);
+    if (retVal < 0)
+    {
+        fprintf(stderr, "Write error\n");
+        return;
+    }
+    else if (retVal < strlen(buffer) + 1)
+    {
+        fprintf(stderr, "Socket closed early\n");
+        return;
+    }
+}
+
+/* The function sendQuestions() picks questions from the database. For each question, the function
+ * sends tha question to the client, receives the client's answer, updates the client's score and
+ * sends a message telling the client whether the answer was correct (and what the right answer was
+ * if necessary)
+ *
+ * Arguments:   cfd:    file descriptor for communication with client over socket
+ *
+ * Return Value:        Returns FAILURE (-1) if some error occurs communicating over the socket (or
+ * if the client closes the socket). Otherwise, returns the client's score */
+int sendQuestions(int cfd)
+{
     int score = 0;                    /* Number of questions client gets right */
     int questionsAsked[NUMQUESTIONS]; /* Stores questions already asked */
+    int totRead;                      /* return values of functions. Used for error checking */
+    char buffer[BUFLEN];              /* Buffer for sending/receiving data over socket*/
+
     for (int questionNum = 0; questionNum < NUMQUESTIONS; questionNum++)
     {
         int curQuestion = rand() % (sizeof(QuizQ) / sizeof(QuizQ[0])); /* Choose random question */
@@ -186,20 +221,20 @@ void hostQuiz(int cfd)
         questionsAsked[questionNum] = curQuestion;
 
         /* Send question, including '\0' */
-        retVal = safeWrite(cfd, QuizQ[curQuestion], strlen(QuizQ[curQuestion]) + 1);
-        if (retVal < 0)
+        totRead = safeWrite(cfd, QuizQ[curQuestion], strlen(QuizQ[curQuestion]) + 1);
+        if (totRead < 0)
         {
             fprintf(stderr, "Write error\n");
-            return;
+            return FAILURE;
         }
-        else if (retVal < strlen(QuizQ[curQuestion]) + 1)
+        else if (totRead < strlen(QuizQ[curQuestion]) + 1)
         {
             fprintf(stderr, "Socket closed early\n");
-            return;
+            return FAILURE;
         }
 
         /* Read client's response. Response must be terminated by '\0' */
-        totRead = 0;              /* Number of bytes read */
+        int totRead = 0;          /* Number of bytes read */
         int bufferOverflowed = 0; /* Flag, marks that the response was too big for the buffer */
         do
         {
@@ -208,12 +243,12 @@ void hostQuiz(int cfd)
             if (totRead < 0)
             {
                 fprintf(stderr, "Read error\n");
-                return;
+                return FAILURE;
             }
             else if (totRead == 0)
             {
                 fprintf(stderr, "Socket closed early\n");
-                return;
+                return FAILURE;
             }
 
             /* If the buffer was not big enough to hold answer, we can assume it is wrong since
@@ -239,30 +274,18 @@ void hostQuiz(int cfd)
         }
 
         /* Send answer, including '\0' */
-        retVal = safeWrite(cfd, buffer, strlen(buffer) + 1);
-        if (retVal < 0)
+        totRead = safeWrite(cfd, buffer, strlen(buffer) + 1);
+        if (totRead < 0)
         {
             fprintf(stderr, "Write error\n");
-            return;
+            return FAILURE;
         }
-        else if (retVal < strlen(buffer) + 1)
+        else if (totRead < strlen(buffer) + 1)
         {
             fprintf(stderr, "Socket closed early\n");
-            return;
+            return FAILURE;
         }
     }
 
-    /* Send score, including '\0' */
-    snprintf(buffer, sizeof(buffer), "Your quiz score is %d/%d. Goodbye.\n", score, NUMQUESTIONS);
-    retVal = safeWrite(cfd, buffer, strlen(buffer) + 1);
-    if (retVal < 0)
-    {
-        fprintf(stderr, "Write error\n");
-        return;
-    }
-    else if (retVal < strlen(buffer) + 1)
-    {
-        fprintf(stderr, "Socket closed early\n");
-        return;
-    }
+    return score;
 }
